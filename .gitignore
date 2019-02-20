@@ -1,0 +1,4 @@
+neural-style/imagenet-vgg-verydeep-19.mat
+StackGAN-Pytorch/data/coco/*
+StackGAN-Pytorch/models/coco/*
+
