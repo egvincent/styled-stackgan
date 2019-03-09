@@ -4,4 +4,6 @@ StackGAN-Pytorch/models/coco/*
 StackGAN/data/*
 StackGAN/models/*
 tmp-data
+StyleGAN/data/*
+StyleGAN/models/*
 
