@@ -3,51 +3,99 @@
 import argparse
 import subprocess
 import os
+import pickle
+import scipy.misc
 from PIL import Image
 
 # example:
 # python generate-stylized-dataset.py \
-#   --inputs ############# todo: switch to birds dataset
-#   --outputs ~/project/data/coco-stylized/1-starry-night \
-#   --style ~/project/styles/1-starry-night.png
+#   --inputs ~/project/StackGAN/Data/birds/train/304images.pickle \
+#   --outputs ~/project/data/birds-stylized/1-starry-night \
+#   --style ~/project/style-images/1-starry-night.jpg
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--inputs', type=str, help='ABSOLUTE path to input image directory')
-parser.add_argument('--outputs', type=str, help='ABSOLUTE path to output image directory')
-parser.add_argument('--style', type=str, help='ABSOLUTE path to style image')
-# 310 px is a magic number: it's a little over the minimum size inputs to StackGAN (Stage II) can be,
-#   given that StackGAN will resize input images to 76/64 * 256 = 304 for Stage II to make
-#   random cropping (to size 256) work out.
-parser.add_argument('--out_size', type=int, const=310, help='optional: output image size (pixels)')
-# default: stop after 500 images for the given style
-parser.add_argument('--count', type=int, const=500, help='number of images to stylize')
-args = parser.parse_args()
 
-# change directory to neural-style while running
-subprocess.run("cd ~/project/neural-style/", shell=True)
+# output pickle file will be placed into the main project directory (call this script from there)
 
-# iterate over images in args.inputs until hitting max of args.counts
-for i,filename in os.listdir(args.inputs):
-    if i >= args.count:
-        print("========== done ==========")
-        break
+# if you interrupt the script, delete the temporary file from neural-style
 
-    print("========== starting neural-style for image " + str(i) + ": " + image + "==========")
 
-    # make temporary resized image file
-    img = Image.open(args.inputs + '/' + filename)
-    img = img.resize((args.out_size, args.out_size), PIL.Image.BILINEAR)
-    temp_file_path = "TEMP-" + filename
-    img.save(temp_file_path)
+# if you already have a folder of stylized images, and just want to add more, that is fine:
+#   just list the same folder as the output folder, and the script adds more to it. it will
+#   re-pickle the images in the output folder into a new pickle file.
 
-    subprocess.run("python neural_style.py --styles " + args.style \
-        + " --content " + temp_file_path \
-        + " --output " + args.outputs + '/' + image \
-        + " -- preserve-colors", \
-        shell=True)
 
-    # delete temporary resized image file
-    subprocess.run("rm " + temp_file_path, shell=True)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--inputs', type=str, help='ABSOLUTE path to input image pickle file')
+    parser.add_argument('--outputs', type=str, help='ABSOLUTE path to output image directory')
+    parser.add_argument('--style', type=str, help='ABSOLUTE path to style image')
+    # default: start at the first image (index 0) in the input list.
+    #   NOTE: the images need to be consecutive, starting from the beginning, or else the indices
+    #   won't line up with the metadata indices used by StackGAN
+    parser.add_argument('--start', type=int, default=0, help='index of first image to stylize')
+    # default: stop after 500 images for the given style
+    parser.add_argument('--count', type=int, default=500, help='number of images to stylize')
+    args = parser.parse_args()
+    
+    # change directory to neural-style while running
+    with cd("~/project/neural-style/"):
+         
+        # read images
+        print("reading input image pickle file")
+        images = None
+        with open(args.inputs, 'rb') as f:
+            # specify encoding to handle objects pickled in python 2.7
+            images = pickle.load(f, encoding='latin1')
+        print("successfully loaded images")
+        
+        
+        for i in range(args.start, min(args.start + args.count, len(images))):        
+            print("========== starting neural-style for image " + str(i) + "==========")
+            
+            # make temporary image file from the current image array
+            temp_img_filename = "TEMP-image-" + str(i) + ".png"
+            scipy.misc.imsave(temp_img_filename, images[i])
+            
+            # run style transfer on temporary image
+            out_img_filename = "stylized-image-" + str(i) + ".png"
+            subprocess.run("python neural_style.py --styles " + args.style \
+                + " --content " + temp_img_filename \
+                + " --output " + args.outputs + '/' + out_img_filename \
+                + " --preserve-colors", \
+                shell=True)
+            
+            # delete temporary resized image file
+            subprocess.run("rm " + temp_img_filename, shell=True)
 
-# switch back to project directory
-subprocess.run("cd ~/project/", shell=True)
+    print("========== done styling input images ==========")
+
+    print("creating pickle file")
+    image_list = []
+    for filename in os.listdir(args.outputs):
+        image = scipy.misc.imread(args.outputs + '/' + filename)
+        image_list.append(image)
+    input_filename = args.inputs.split(".")[0]
+    output_filename = input_filename + "-stylized.pickle"
+    with open(output_filename, 'wb') as f:
+        pickle.dump(image_list, f)  # no encoding option for this, so hopefully stackgan can read it
+
+    print("done: created " + output_filename)
+
+
+# need this to change directory safely
+# from https://stackoverflow.com/a/13197763
+class cd:
+    """Context manager for changing the current working directory"""
+    def __init__(self, newPath):
+        self.newPath = os.path.expanduser(newPath)
+
+    def __enter__(self):
+        self.savedPath = os.getcwd()
+        os.chdir(self.newPath)
+        
+    def __exit__(self, etype, value, traceback):
+        os.chdir(self.savedPath)
+
+
+if __name__ == "__main__":
+    main()
