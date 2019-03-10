@@ -14,7 +14,8 @@ from PIL import Image
 #   --style ~/project/style-images/1-starry-night.jpg
 
 
-# output pickle file will be placed into the main project directory (call this script from there)
+# output pickle file will be placed into the same directory as the input pickle file, but
+#   with suffix "-stylized"
 
 # if you interrupt the script, delete the temporary file from neural-style
 
@@ -77,7 +78,7 @@ def main():
     input_filename = args.inputs.split(".")[0]
     output_filename = input_filename + "-stylized.pickle"
     with open(output_filename, 'wb') as f:
-        pickle.dump(image_list, f)  # no encoding option for this, so hopefully stackgan can read it
+        pickle.dump(image_list, f, protocol=2)  # protocol=2 is so it will work when it's read in python 2.7
 
     print("done: created " + output_filename)
 

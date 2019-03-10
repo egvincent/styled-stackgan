@@ -1,6 +1,7 @@
 CONFIG_NAME: 'stageII'
 
 DATASET_NAME: 'birds'
+# DATASET_NAME: 'birds-stylized-1'
 EMBEDDING_TYPE: 'cnn-rnn'
 GPU_ID: 0
 Z_DIM: 100
