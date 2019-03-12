@@ -7,80 +7,192 @@ import pickle
 import scipy.misc
 from PIL import Image
 
+# Generates stylized input images and truncated pickle files for each type of data, to
+#   match the number or stylized images. Does NOT randomize, but instead is intended to 
+#   called in such a way that the outputs are K full species' worth of stylized images
+#   (such that we have enough training data per species, instead of a scattered set of
+#   images across many species).
+
 # example:
 # python generate-stylized-dataset.py \
-#   --inputs ~/project/StackGAN/Data/birds/train/304images.pickle \
-#   --outputs ~/project/data/birds-stylized/1-starry-night \
-#   --style ~/project/style-images/1-starry-night.jpg
+#   --input ~/project/StyleGAN/Data/birds/train/ \
+#   --image_out ~/project/data/birds-stylized-images/ \
+#   --pickle_out ~/project/data/birds-stylized/ \
+#   --style ~/project/style-images/
+#   --num_new 500
 
+# input and pickle_out directory should/will have the following pickle files:
+#   - 76images.pickle, a list of np arrays of shape (76, 76, 3)
+#   - 304images.pickle, a list of np arrays of shape (304, 304, 3)
+#   - char-CNN-RNN-embeddings.pickle, a list of np arrays of shape (10, 1024)
+#   - class_info.pickle, a list of ints (class IDs)
+#   - filenames.pickle, a list of strings
+# pickle_out directory will also have:
+#   - style_info.pickle, a list of ints (style IDs)
 
-# output pickle file will be placed into the same directory as the input pickle file, but
-#   with suffix "-stylized"
-
-# if you interrupt the script, delete the temporary file from neural-style
-
-
-# if you already have a folder of stylized images, and just want to add more, that is fine:
-#   just list the same folder as the output folder, and the script adds more to it. it will
-#   re-pickle the images in the output folder into a new pickle file.
+# if you interrupt the script, delete the temporary file from neural-style/
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--inputs', type=str, help='ABSOLUTE path to input image pickle file')
-    parser.add_argument('--outputs', type=str, help='ABSOLUTE path to output image directory')
-    parser.add_argument('--style', type=str, help='ABSOLUTE path to style image')
-    # default: start at the first image (index 0) in the input list.
-    #   NOTE: the images need to be consecutive, starting from the beginning, or else the indices
-    #   won't line up with the metadata indices used by StackGAN
-    parser.add_argument('--start', type=int, default=0, help='index of first image to stylize')
-    # default: stop after 500 images for the given style
-    parser.add_argument('--count', type=int, default=500, help='number of images to stylize')
-    args = parser.parse_args()
     
-    # change directory to neural-style while running
-    with cd("~/project/neural-style/"):
-         
-        # read images
-        print("reading input image pickle file")
-        images = None
-        with open(args.inputs, 'rb') as f:
-            # specify encoding to handle objects pickled in python 2.7
-            images = pickle.load(f, encoding='latin1')
-        print("successfully loaded images")
-        
-        
-        for i in range(args.start, min(args.start + args.count, len(images))):        
-            print("========== starting neural-style for image " + str(i) + "==========")
-            
-            # make temporary image file from the current image array
-            temp_img_filename = "TEMP-image-" + str(i) + ".png"
-            scipy.misc.imsave(temp_img_filename, images[i])
-            
-            # run style transfer on temporary image
-            out_img_filename = "stylized-image-" + str(i) + ".png"
-            subprocess.run("python neural_style.py --styles " + args.style \
-                + " --content " + temp_img_filename \
-                + " --output " + args.outputs + '/' + out_img_filename \
-                + " --preserve-colors", \
-                shell=True)
-            
-            # delete temporary resized image file
-            subprocess.run("rm " + temp_img_filename, shell=True)
+    parser.add_argument('--input', type=str, help='ABSOLUTE path to input data directory')
+    parser.add_argument('--image_out', type=str, help='ABSOLUTE path to output image directory')
+    parser.add_argument('--pickle_out', type=str, help='ABSOLUTE path to output pickle file directory')
+    parser.add_argument('--styles', type=str, help='ABSOLUTE path to style image directory')
+    parser.add_argument('--num_new', type=int, help='number of new images to stylize and pickle \
+            per style. 0 to just repickle. don\'t pass --stop_index at the same time')
+    parser.add_argument('--stop_index', type=int, help='alternative to --num_new: index of last image to stylize, \
+            for each style, instead of a number to add. no bounds checking, so don\'t be dumb. \
+            use this option if you currently have a different number of images of each style.')
+
+    args = parser.parse_args()
+
+
+    # generate args.count new stylized images and put them in args.image_out
+    # -------------------------------------------------------------------------
+    
+    print("reading input image pickle file")
+    images = None
+    with open(os.path.join(args.input, "304images.pickle"), 'rb') as f:
+        # specify encoding to handle objects pickled in python 2.7
+        images = pickle.load(f, encoding='latin1')
+    print("done")
+
+    style_names = []  # just save names for the pickle file creation step later
+    num_existing = None  # same
+    stop_index = None  # same
+
+    for style_filename in os.listdir(args.styles):
+
+        print("making output image directory, if doesn't already exist")
+        style_name = style_filename[: style_filename.rfind(".")]
+        style_names.append(style_name)
+        subprocess.run("mkdir -p " + os.path.join(args.image_out, style_name), shell=True)
+        print("done")
+
+        print("========= starting neural-style for style " + style_name + " ==========")
+
+        num_existing = len(os.listdir(os.path.join(args.image_out, style_name)))
+        stop_index = args.stop_index
+        if stop_index == None:
+            stop_index = min(num_existing + args.num_new - 1, len(images) - 1)
+
+        # change directory to neural-style while running
+        with cd("~/project/neural-style/"):
+
+            for i in range(num_existing, stop_index + 1):
+                print("---------- starting neural-style for image " + str(i) + " ----------")
+                
+                # make temporary image file from the current image array
+                temp_img_filename = "TEMP-image-" + str(i) + ".png"
+                scipy.misc.imsave(temp_img_filename, images[i])
+                
+                # run style transfer on temporary image
+                out_img_filename = "stylized-image-" + str(i).zfill(5) + ".png"
+                subprocess.run("python neural_style.py " \
+                    + " --styles " + os.path.join(args.styles, style_filename) \
+                    + " --content " + temp_img_filename \
+                    + " --output " + os.path.join(args.image_out, style_name, out_img_filename) \
+                    + " --preserve-colors", \
+                    shell=True)
+                
+                # delete temporary resized image file
+                subprocess.run("rm " + temp_img_filename, shell=True)
+
+                print("done")
+
+        print("done")
 
     print("========== done styling input images ==========")
 
-    print("creating pickle file")
-    image_list = []
-    for filename in os.listdir(args.outputs):
-        image = scipy.misc.imread(args.outputs + '/' + filename)
-        image_list.append(image)
-    input_filename = args.inputs.split(".")[0]
-    output_filename = input_filename + "-stylized.pickle"
-    with open(output_filename, 'wb') as f:
-        pickle.dump(image_list, f, protocol=2)  # protocol=2 is so it will work when it's read in python 2.7
 
-    print("done: created " + output_filename)
+    # pickle all the data from each data file to be of the same length as the 
+    #   total number of stylized images, and put the results in args.pickle_out
+    # -------------------------------------------------------------------------
+
+    print("========== creating pickle files ==========")
+    
+    # for each pickle.read, use encoding=latin, so it will work with pickles made in python 2.7
+    # for each pickle.dump, use protocol=2, so it will work when read in python 2.7
+    # also note that I repeatedly 
+
+    total_per_style = None
+    if args.num_new != None:
+        # (assumes the same number of input images in each style)
+        total_per_style = num_existing + args.num_new
+    else:
+        total_per_style = stop_index + 1
+
+    hr_images = []
+    for style_name in style_names:
+        for filename in os.listdir(os.path.join(args.image_out, style_name)):
+            image = scipy.misc.imread(os.path.join(args.image_out, style_name, filename))
+            hr_images.append(image)
+    with open(os.path.join(args.pickle_out, "304images.pickle"), 'wb') as f:
+        pickle.dump(hr_images, f, protocol=2)
+    print("created 304images.pickle")
+
+    style_info_nested = [[i] * total_per_style for i,_ in enumerate(style_names)]
+    # flatten nested list with this dumb notation: https://stackoverflow.com/a/952952
+    style_info = [item for sublist in style_info_nested for item in sublist]
+    print("created style_info.pickle")
+
+    # for all the following, truncate and replicate the same content for each style, 
+    #   because nothing changes besides the styled image and the style index
+
+    lr_images_single = None
+    with open(os.path.join(args.input, "76images.pickle"), 'rb') as f:
+        lr_images_single = pickle.load(f, encoding='latin1')[:total_per_style]
+    lr_images = lr_images_single * len(style_names)
+    with open(os.path.join(args.pickle_out, "76images.pickle"), 'wb') as f:
+        pickle.dump(lr_images, f, protocol=2)
+    print("created 76images.pickle")
+    
+    embeddings_single = None
+    with open(os.path.join(args.input, "char-CNN-RNN-embeddings.pickle"), 'rb') as f:
+        embeddings_single = pickle.load(f, encoding='latin1')[:total_per_style]
+    embeddings = embeddings_single * len(style_names)
+    with open(os.path.join(args.pickle_out, "char-CNN-RNN-embeddings.pickle"), 'wb') as f:
+        pickle.dump(embeddings, f, protocol=2)
+    print("created char-CNN-RNN-embeddings.pickle")
+
+    class_info_single = None
+    with open(os.path.join(args.input, "class_info.pickle"), 'rb') as f:
+        class_info_single = pickle.load(f, encoding='latin1')[:total_per_style]
+    class_info = class_info_single * len(style_names)
+    with open(os.path.join(args.pickle_out, "class_info.pickle"), 'wb') as f:
+        pickle.dump(class_info, f, protocol=2)
+    print("created class_info.pickle")
+
+    filenames_single = None
+    with open(os.path.join(args.input, "filenames.pickle"), 'rb') as f:
+        filenames_single = pickle.load(f, encoding='latin1')############[:total_per_style]
+    filenames = filenames_single * len(style_names)
+    ###################
+    for i,filename in enumerate(filenames_single):
+        if i >= 500:
+            break
+        print(str(i) + ": " + filename)
+    ###################
+    with open(os.path.join(args.pickle_out, "filenames.pickle"), 'wb') as f:
+        pickle.dump(filenames, f, protocol=2)
+    print("created filenames.pickle") 
+
+    
+    # print(str(len(hr_images)))
+    # print(str(len(style_info)))
+    # print(str(len(lr_images)))
+    # print(str(len(embeddings)))
+    # print(str(len(class_info)))
+    # print(str(len(filenames)))
+
+    assert len(hr_images) == len(style_info) == len(lr_images) \
+            == len(embeddings) == len(class_info) == len(filenames)
+
+
+    print("========== done creating pickle files ==========")
+
 
 
 # need this to change directory safely

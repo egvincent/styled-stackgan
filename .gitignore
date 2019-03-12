@@ -6,4 +6,5 @@ StackGAN/models/*
 tmp-data
 StyleGAN/data/*
 StyleGAN/models/*
+data/*
 
