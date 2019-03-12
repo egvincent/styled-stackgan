@@ -167,14 +167,8 @@ def main():
 
     filenames_single = None
     with open(os.path.join(args.input, "filenames.pickle"), 'rb') as f:
-        filenames_single = pickle.load(f, encoding='latin1')############[:total_per_style]
+        filenames_single = pickle.load(f, encoding='latin1')[:total_per_style]
     filenames = filenames_single * len(style_names)
-    ###################
-    for i,filename in enumerate(filenames_single):
-        if i >= 500:
-            break
-        print(str(i) + ": " + filename)
-    ###################
     with open(os.path.join(args.pickle_out, "filenames.pickle"), 'wb') as f:
         pickle.dump(filenames, f, protocol=2)
     print("created filenames.pickle") 
