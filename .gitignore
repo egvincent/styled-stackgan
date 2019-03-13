@@ -6,5 +6,5 @@ StackGAN/models/*
 tmp-data
 StyleGAN/data/*
 StyleGAN/models/*
-data/*
+data/birds-stylized/*
 
