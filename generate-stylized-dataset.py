@@ -6,7 +6,7 @@ import os
 import pickle
 import scipy.misc
 import numpy as np
-from PIL import Image
+from util import cd
 
 # Generates stylized input images and truncated pickle files for each type of data, to
 #   match the number or stylized images. Does NOT randomize, but instead is intended to 
@@ -170,12 +170,13 @@ def main():
     pickle_queue.append(("filenames.pickle", filenames))
 
     
-    # print(str(len(hr_images)))
-    # print(str(len(style_info)))
-    # print(str(len(lr_images)))
-    # print(str(len(embeddings)))
-    # print(str(len(class_info)))
-    # print(str(len(filenames)))
+    #print(str(len(hr_images)))
+    #print(str(hr_images[0].shape))
+    #print(str(len(style_info)))
+    #print(str(len(lr_images)))
+    #print(str(len(embeddings)))
+    #print(str(len(class_info)))
+    #print(str(len(filenames)))
 
     assert len(hr_images) == len(style_info) == len(lr_images) \
             == len(embeddings) == len(class_info) == len(filenames)
@@ -195,9 +196,9 @@ def main():
 
     for name, data in pickle_queue:
         with open(os.path.join(args.pickle_out, "train", name), 'wb') as f:
-            pickle.dump(np.take(data, train_indices), f, protocol=2)
+            pickle.dump(np.take(data, train_indices, axis=0), f, protocol=2)
         with open(os.path.join(args.pickle_out, "test", name), 'wb') as f:
-            pickle.dump(np.take(data, test_indices), f, protocol=2)
+            pickle.dump(np.take(data, test_indices, axis=0), f, protocol=2)
         print("created " + name)
 
 
@@ -205,20 +206,6 @@ def main():
     print("========== done creating pickle files ==========")
 
 
-
-# need this to change directory safely
-# from https://stackoverflow.com/a/13197763
-class cd:
-    """Context manager for changing the current working directory"""
-    def __init__(self, newPath):
-        self.newPath = os.path.expanduser(newPath)
-
-    def __enter__(self):
-        self.savedPath = os.getcwd()
-        os.chdir(self.newPath)
-        
-    def __exit__(self, etype, value, traceback):
-        os.chdir(self.savedPath)
 
 
 if __name__ == "__main__":
