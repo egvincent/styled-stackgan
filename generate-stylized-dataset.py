@@ -5,6 +5,7 @@ import subprocess
 import os
 import pickle
 import scipy.misc
+import numpy as np
 from PIL import Image
 
 # Generates stylized input images and truncated pickle files for each type of data, to
@@ -18,10 +19,11 @@ from PIL import Image
 #   --input ~/project/StyleGAN/Data/birds/train/ \
 #   --image_out ~/project/data/birds-stylized-images/ \
 #   --pickle_out ~/project/data/birds-stylized/ \
-#   --style ~/project/style-images/
-#   --num_new 500
+#   --style ~/project/style-images/ \
+#   --test_percent 30 \
+#   --stop_index 450
 
-# input and pickle_out directory should/will have the following pickle files:
+# input and pickle_out directory should/will have the following pickle files, divided into train and test folders:
 #   - 76images.pickle, a list of np arrays of shape (76, 76, 3)
 #   - 304images.pickle, a list of np arrays of shape (304, 304, 3)
 #   - char-CNN-RNN-embeddings.pickle, a list of np arrays of shape (10, 1024)
@@ -45,6 +47,8 @@ def main():
     parser.add_argument('--stop_index', type=int, help='alternative to --num_new: index of last image to stylize, \
             for each style, instead of a number to add. no bounds checking, so don\'t be dumb. \
             use this option if you currently have a different number of images of each style.')
+    parser.add_argument('--test_percent', type=int, help='percent of the data to put in the \
+            test set (only the pickle output is divided into train/test)')
 
     args = parser.parse_args()
 
@@ -124,19 +128,19 @@ def main():
     else:
         total_per_style = stop_index + 1
 
+    pickle_queue = []
+
     hr_images = []
     for style_name in style_names:
         for filename in os.listdir(os.path.join(args.image_out, style_name)):
             image = scipy.misc.imread(os.path.join(args.image_out, style_name, filename))
             hr_images.append(image)
-    with open(os.path.join(args.pickle_out, "304images.pickle"), 'wb') as f:
-        pickle.dump(hr_images, f, protocol=2)
-    print("created 304images.pickle")
+    pickle_queue.append(("304images.pickle", hr_images))
 
     style_info_nested = [[i] * total_per_style for i,_ in enumerate(style_names)]
     # flatten nested list with this dumb notation: https://stackoverflow.com/a/952952
     style_info = [item for sublist in style_info_nested for item in sublist]
-    print("created style_info.pickle")
+    pickle_queue.append(("style_info.pickle", style_info))
 
     # for all the following, truncate and replicate the same content for each style, 
     #   because nothing changes besides the styled image and the style index
@@ -145,33 +149,25 @@ def main():
     with open(os.path.join(args.input, "76images.pickle"), 'rb') as f:
         lr_images_single = pickle.load(f, encoding='latin1')[:total_per_style]
     lr_images = lr_images_single * len(style_names)
-    with open(os.path.join(args.pickle_out, "76images.pickle"), 'wb') as f:
-        pickle.dump(lr_images, f, protocol=2)
-    print("created 76images.pickle")
+    pickle_queue.append(("76images.pickle", lr_images))
     
     embeddings_single = None
     with open(os.path.join(args.input, "char-CNN-RNN-embeddings.pickle"), 'rb') as f:
         embeddings_single = pickle.load(f, encoding='latin1')[:total_per_style]
     embeddings = embeddings_single * len(style_names)
-    with open(os.path.join(args.pickle_out, "char-CNN-RNN-embeddings.pickle"), 'wb') as f:
-        pickle.dump(embeddings, f, protocol=2)
-    print("created char-CNN-RNN-embeddings.pickle")
+    pickle_queue.append(("char-CNN-RNN-embeddings.pickle", embeddings))
 
     class_info_single = None
     with open(os.path.join(args.input, "class_info.pickle"), 'rb') as f:
         class_info_single = pickle.load(f, encoding='latin1')[:total_per_style]
     class_info = class_info_single * len(style_names)
-    with open(os.path.join(args.pickle_out, "class_info.pickle"), 'wb') as f:
-        pickle.dump(class_info, f, protocol=2)
-    print("created class_info.pickle")
+    pickle_queue.append(("class_info.pickle", class_info))
 
     filenames_single = None
     with open(os.path.join(args.input, "filenames.pickle"), 'rb') as f:
         filenames_single = pickle.load(f, encoding='latin1')[:total_per_style]
     filenames = filenames_single * len(style_names)
-    with open(os.path.join(args.pickle_out, "filenames.pickle"), 'wb') as f:
-        pickle.dump(filenames, f, protocol=2)
-    print("created filenames.pickle") 
+    pickle_queue.append(("filenames.pickle", filenames))
 
     
     # print(str(len(hr_images)))
@@ -183,6 +179,27 @@ def main():
 
     assert len(hr_images) == len(style_info) == len(lr_images) \
             == len(embeddings) == len(class_info) == len(filenames)
+
+    
+    print("making output pickle directories (for train and test), if they don't already exist")
+    subprocess.run("mkdir -p " + os.path.join(args.pickle_out, "train"), shell=True)
+    subprocess.run("mkdir -p " + os.path.join(args.pickle_out, "test"), shell=True)
+    print("done")
+
+
+    train_frac = 1 - args.test_percent / 100.0
+    test_start_index = int(train_frac * len(hr_images))
+    indices = np.random.permutation(len(hr_images))
+    train_indices = indices[:test_start_index]
+    test_indices = indices[test_start_index:]
+
+    for name, data in pickle_queue:
+        with open(os.path.join(args.pickle_out, "train", name), 'wb') as f:
+            pickle.dump(np.take(data, train_indices), f, protocol=2)
+        with open(os.path.join(args.pickle_out, "test", name), 'wb') as f:
+            pickle.dump(np.take(data, test_indices), f, protocol=2)
+        print("created " + name)
+
 
 
     print("========== done creating pickle files ==========")
