@@ -2,6 +2,7 @@ from __future__ import division
 from __future__ import print_function
 
 import prettytensor as pt
+import numpy as np
 import tensorflow as tf
 import misc.custom_ops
 from misc.custom_ops import leaky_rectify
@@ -214,6 +215,12 @@ class CondGAN(object):
                     apply(leaky_rectify, leakiness=0.2))
         return template
 
+    def style_context_embedding(self):
+        template = (pt.template("input").
+                    custom_fully_connected(1).
+                    apply(leaky_rectify, leakiness=0.2))
+        return template
+    
     def discriminator(self):
         template = \
             (pt.template("input").  # s16 * s16 * 128*9
@@ -310,12 +317,27 @@ class CondGAN(object):
 
         return node1
 
-    def hr_get_discriminator(self, x_var, c_var):
+    def hr_get_discriminator(self, x_var, c_var, s_var):
         x_code = self.hr_d_image_template.construct(input=x_var)  # s16 * s16 * df_dim*8
-
+    
+        
+        print('c_var '+str(np.shape(c_var)))
         c_code = self.hr_d_context_template.construct(input=c_var)
+        print('c_code constructed from c_var - '+str(np.shape(c_code)))
         c_code = tf.expand_dims(tf.expand_dims(c_code, 1), 1)
+        print('c_code after expanding dims - '+str(np.shape(c_code)))
         c_code = tf.tile(c_code, [1, self.s16, self.s16, 1])  # s16 * s16 * ef_dim
+        print('c_code tiled: '+str(np.shape(c_code)))
+        
+        print('s_code '+str(np.shape(s_var)))
 
-        x_c_code = tf.concat(axis=3, values=[x_code, c_code])
+        s_code = tf.expand_dims(tf.expand_dims(tf.expand_dims(s_var, 1), 1), 1)
+        print('s_code after expand_dims - '+str(np.shape(s_code)))
+        s_code = tf.tile(s_code, [1, self.s16, self.s16, 1]) # s16 * s16 * 1
+
+        print('s_code tiled -  '+ str(np.shape(s_code)))
+        
+        x_c_code = tf.concat(axis=3, values=[x_code, c_code, s_code])
+        print('x_code shape - '+str(np.shape(x_c_code)))
+        
         return self.hr_discriminator_template.construct(input=x_c_code)

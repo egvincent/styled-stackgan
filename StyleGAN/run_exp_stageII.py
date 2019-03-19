@@ -53,6 +53,7 @@ if __name__ == "__main__":
             (cfg.DATASET_NAME, cfg.CONFIG_NAME, timestamp)
         mkdir_p(ckt_logs_dir)
     else:
+        print('train flag off')
         s_tmp = cfg.TRAIN.PRETRAINED_MODEL
         ckt_logs_dir = s_tmp[:s_tmp.find('.ckpt')]
 

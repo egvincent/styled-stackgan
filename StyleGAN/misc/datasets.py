@@ -9,11 +9,13 @@ import random
 
 class Dataset(object):
     def __init__(self, images, imsize, embeddings=None,
+                 style_embeddings = None,
                  filenames=None, workdir=None,
                  labels=None, aug_flag=True,
                  class_id=None, class_range=None):
         self._images = images
         self._embeddings = embeddings
+        self._style_embeddings = style_embeddings
         self._filenames = filenames
         self.workdir = workdir
         self._labels = labels
@@ -36,6 +38,10 @@ class Dataset(object):
     @property
     def embeddings(self):
         return self._embeddings
+
+    @property
+    def style_embeddings(self):
+        return self._style_embeddings
 
     @property
     def filenames(self):
@@ -84,7 +90,7 @@ class Dataset(object):
         else:
             return images
 
-    def sample_embeddings(self, embeddings, filenames, class_id, sample_num):
+    def sample_embeddings(self, embeddings, style_embeddings, filenames, class_id, sample_num):
         if len(embeddings.shape) == 2 or embeddings.shape[1] == 1:
             return np.squeeze(embeddings)
         else:
@@ -92,6 +98,7 @@ class Dataset(object):
             # Take every sample_num captions to compute the mean vector
             sampled_embeddings = []
             sampled_captions = []
+            sampled_style_embeddings = []
             for i in range(batch_size):
                 randix = np.random.choice(embedding_num,
                                           sample_num, replace=False)
@@ -101,12 +108,15 @@ class Dataset(object):
                                                  class_id[i])
                     sampled_captions.append(captions[randix])
                     sampled_embeddings.append(embeddings[i, randix, :])
+                    sampled_style_embeddings.append(style_embeddings[i])
                 else:
                     e_sample = embeddings[i, randix, :]
                     e_mean = np.mean(e_sample, axis=0)
                     sampled_embeddings.append(e_mean)
+                    sampled_style_embeddings.append(style_embeddings[i])
             sampled_embeddings_array = np.array(sampled_embeddings)
-            return np.squeeze(sampled_embeddings_array), sampled_captions
+            sampled_style_embeddings_array = np.array(sampled_style_embeddings)
+            return np.squeeze(sampled_embeddings_array), np.squeeze(sampled_style_embeddings_array), sampled_captions
 
     def next_batch(self, batch_size, window):
         """Return the next `batch_size` examples from this data set."""
@@ -135,7 +145,9 @@ class Dataset(object):
              np.random.randint(100, 200)) % self._num_examples
 
         sampled_images = self._images[current_ids]
+        #print('_images - '+str(np.shape(self._images)))
         sampled_wrong_images = self._images[fake_ids, :, :, :]
+        #sampled_wrong_images = self._images[fake_ids]
         sampled_images = sampled_images.astype(np.float32)
         sampled_wrong_images = sampled_wrong_images.astype(np.float32)
         sampled_images = sampled_images * (2. / 255) - 1.
@@ -148,10 +160,13 @@ class Dataset(object):
         if self._embeddings is not None:
             filenames = [self._filenames[i] for i in current_ids]
             class_id = [self._class_id[i] for i in current_ids]
-            sampled_embeddings, sampled_captions = \
-                self.sample_embeddings(self._embeddings[current_ids],
+            sampled_embeddings, sampled_style_embeddings, sampled_captions = \
+                self.sample_embeddings(self._embeddings[current_ids], self._style_embeddings[current_ids],
                                        filenames, class_id, window)
             ret_list.append(sampled_embeddings)
+            #print('sampled embeddings - '+str(np.shape(sampled_embeddings)))
+            ret_list.append(sampled_style_embeddings)
+            #print('sampled style embeddings - '+str(len(sampled_style_embeddings)))
             ret_list.append(sampled_captions)
         else:
             ret_list.append(None)
@@ -181,6 +196,10 @@ class Dataset(object):
         _, embedding_num, _ = sampled_embeddings.shape
         sampled_embeddings_batchs = []
 
+        sampled_style_indices = self._style_embeddings[start:end]
+        styleindices_num = end-start
+        sampled_styleindices_batchs = []
+        
         sampled_captions = []
         sampled_filenames = self._filenames[start:end]
         sampled_class_id = self._class_id[start:end]
@@ -194,7 +213,10 @@ class Dataset(object):
             batch = sampled_embeddings[:, i, :]
             sampled_embeddings_batchs.append(np.squeeze(batch))
 
-        return [sampled_images, sampled_embeddings_batchs,
+            stylebatch = sampled_style_indices[i]
+            sampled_styleindices_batchs.append(stylebatch)
+
+        return [sampled_images, sampled_embeddings_batchs, sampled_styleindices_batchs,
                 self._saveIDs[start:end], sampled_captions]
 
 
@@ -205,7 +227,8 @@ class TextDataset(object):
         if self.hr_lr_ratio == 1:
             self.image_filename = '/76images.pickle'
         elif self.hr_lr_ratio == 4:
-            self.image_filename = '/304images-stylized.pickle' #############TODO: fix jank -stylized thing
+            self.image_filename = '/304images.pickle'
+            #self.image_filename = '/304images-backupcopy.pickle'
 
         self.image_shape = [lr_imsize * self.hr_lr_ratio,
                             lr_imsize * self.hr_lr_ratio, 3]
@@ -218,18 +241,30 @@ class TextDataset(object):
             self.embedding_filename = '/char-CNN-RNN-embeddings.pickle'
         elif embedding_type == 'skip-thought':
             self.embedding_filename = '/skip-thought-embeddings.pickle'
+        self.style_filename = '/style_info.pickle'
 
     def get_data(self, pickle_path, aug_flag=True):
         with open(pickle_path + self.image_filename, 'rb') as f:
             images = pickle.load(f)
+            print('first image shape from loading pickle: ',np.shape(images[0]))
             images = np.array(images)
-            print('images: ', images.shape)
+            print('images after converting: ', images.shape)
 
         with open(pickle_path + self.embedding_filename, 'rb') as f:
             embeddings = pickle.load(f)
             embeddings = np.array(embeddings)
             self.embedding_shape = [embeddings.shape[-1]]
             print('embeddings: ', embeddings.shape)
+
+        with open(pickle_path + self.style_filename, 'rb') as f:
+            style_embeddings = pickle.load(f)
+            style_embeddings_length = len(style_embeddings)
+            style_embeddings = np.array(style_embeddings)
+            #style_embeddings = np.reshape(style_embeddings, (style_embeddings_length, 1, 1024))
+            #self.style_embeddings_shape = len(style_embeddings)
+            self.style_embeddings_shape = [style_embeddings.shape[-1]]
+            print('style embeddings shape: ', style_embeddings.shape)
+            
         with open(pickle_path + '/filenames.pickle', 'rb') as f:
             list_filenames = pickle.load(f)
             print('list_filenames: ', len(list_filenames), list_filenames[0])
@@ -237,5 +272,5 @@ class TextDataset(object):
             class_id = pickle.load(f)
 
         return Dataset(images, self.image_shape[0], embeddings,
-                       list_filenames, self.workdir, None,
+                       style_embeddings, list_filenames, self.workdir, None,
                        aug_flag, class_id)

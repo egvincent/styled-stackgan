@@ -1,20 +1,18 @@
 CONFIG_NAME: 'stageII'
 
 DATASET_NAME: 'birds'
-# DATASET_NAME: 'birds-stylized-1'
 EMBEDDING_TYPE: 'cnn-rnn'
 GPU_ID: 0
 Z_DIM: 100
 
 TRAIN:
     FLAG: True
-    # PRETRAINED_MODEL: './ckt_logs/birds/stageI/model_82000.ckpt'
     PRETRAINED_MODEL: './models/birds_model_164000.ckpt'
     PRETRAINED_EPOCH: 600
     BATCH_SIZE: 64
     NUM_COPY: 4
     MAX_EPOCH: 1200
-    SNAPSHOT_INTERVAL: 2000
+    SNAPSHOT_INTERVAL: 50
     DISCRIMINATOR_LR: 0.0002
     GENERATOR_LR: 0.0002
     LR_DECAY_EPOCH: 100

@@ -66,11 +66,18 @@ class CondGANTrainer(object):
             tf.float32, [self.batch_size] + self.hr_image_shape,
             name='wrong_hr_images'
         )
+
         self.embeddings = tf.placeholder(
             tf.float32, [self.batch_size] + self.dataset.embedding_shape,
             name='conditional_embeddings'
         )
 
+        self.style_indices = tf.placeholder(
+            tf.float32,
+            [self.batch_size],
+            name='style_indicesDBG'
+        )
+               
         self.generator_lr = tf.placeholder(
             tf.float32, [],
             name='generator_learning_rate'
@@ -122,6 +129,7 @@ class CondGANTrainer(object):
                                     self.wrong_images,
                                     fake_images,
                                     self.embeddings,
+                                    self.style_indices, #but we don't need to use style indices for discriminator loss
                                     flag='lr')
             generator_loss += kl_loss
             self.log_vars.append(("g_loss_kl_loss", kl_loss))
@@ -139,6 +147,7 @@ class CondGANTrainer(object):
                                     self.hr_wrong_images,
                                     hr_fake_images,
                                     self.embeddings,
+                                    self.style_indices,
                                     flag='hr')
             hr_generator_loss += hr_kl_loss
             self.log_vars.append(("hr_g_loss", hr_generator_loss))
@@ -165,7 +174,7 @@ class CondGANTrainer(object):
                 self.model.hr_get_generator(self.fake_images, hr_c)
 
     def compute_losses(self, images, wrong_images,
-                       fake_images, embeddings, flag='lr'):
+                       fake_images, embeddings, style_indices, flag='lr'):
         if flag == 'lr':
             real_logit =\
                 self.model.get_discriminator(images, embeddings)
@@ -175,11 +184,11 @@ class CondGANTrainer(object):
                 self.model.get_discriminator(fake_images, embeddings)
         else:
             real_logit =\
-                self.model.hr_get_discriminator(images, embeddings)
+                self.model.hr_get_discriminator(images, embeddings, style_indices)
             wrong_logit =\
-                self.model.hr_get_discriminator(wrong_images, embeddings)
+                self.model.hr_get_discriminator(wrong_images, embeddings, style_indices)
             fake_logit =\
-                self.model.hr_get_discriminator(fake_images, embeddings)
+                self.model.hr_get_discriminator(fake_images, embeddings, style_indices)
 
         real_d_loss =\
             tf.nn.sigmoid_cross_entropy_with_logits(logits=real_logit,
@@ -225,7 +234,6 @@ class CondGANTrainer(object):
         all_vars = tf.trainable_variables()
         tarin_vars = [var for var in all_vars if
                       var.name.startswith(key_word)]
-
         opt = tf.train.AdamOptimizer(learning_rate, beta1=0.5)
         trainer = pt.apply_optimizer(opt, losses=[loss], var_list=tarin_vars)
         return trainer
@@ -325,12 +333,12 @@ class CondGANTrainer(object):
         return x
 
     def epoch_sum_images(self, sess, n):
-        images_train, _, embeddings_train, captions_train, _ =\
+        images_train, _, embeddings_train, styleindices_train, captions_train, _ =\
             self.dataset.train.next_batch(n * n, cfg.TRAIN.NUM_EMBEDDING)
         images_train = self.preprocess(images_train, n)
         embeddings_train = self.preprocess(embeddings_train, n)
 
-        images_test, _, embeddings_test, captions_test, _ =\
+        images_test, _, embeddings_test, styleindices_test, captions_test, _ =\
             self.dataset.test.next_batch(n * n, 1)
         images_test = self.preprocess(images_test, n)
         embeddings_test = self.preprocess(embeddings_test, n)
@@ -338,17 +346,20 @@ class CondGANTrainer(object):
         images = np.concatenate([images_train, images_test], axis=0)
         embeddings =\
             np.concatenate([embeddings_train, embeddings_test], axis=0)
-
+        style_indices = np.append(styleindices_train, styleindices_test)
+        
         if self.batch_size > 2 * n * n:
-            images_pad, _, embeddings_pad, _, _ =\
+            images_pad, _, embeddings_pad, styleindices_pad, _, _ =\
                 self.dataset.test.next_batch(self.batch_size - 2 * n * n, 1)
             images = np.concatenate([images, images_pad], axis=0)
             embeddings = np.concatenate([embeddings, embeddings_pad], axis=0)
+            style_indices = np.append(style_indices, styleindices_pad)
 
         feed_out = [self.superimages, self.image_summary,
                     self.hr_superimages, self.hr_image_summary]
         feed_dict = {self.hr_images: images,
-                     self.embeddings: embeddings}
+                     self.embeddings: embeddings,
+                     self.style_indices: style_indices}
         gen_samples, img_summary, hr_gen_samples, hr_img_summary =\
             sess.run(feed_out, feed_dict)
 
@@ -405,12 +416,13 @@ class CondGANTrainer(object):
                        discriminator_lr,
                        counter, summary_writer, log_vars, sess):
         # training d
-        hr_images, hr_wrong_images, embeddings, _, _ =\
+        hr_images, hr_wrong_images, embeddings, style_indices,_, _ =\
             self.dataset.train.next_batch(self.batch_size,
                                           cfg.TRAIN.NUM_EMBEDDING)
         feed_dict = {self.hr_images: hr_images,
                      self.hr_wrong_images: hr_wrong_images,
                      self.embeddings: embeddings,
+                     self.style_indices: style_indices,
                      self.generator_lr: generator_lr,
                      self.discriminator_lr: discriminator_lr
                      }
@@ -486,6 +498,10 @@ class CondGANTrainer(object):
                 # int((counter + lr_decay_step/2) / lr_decay_step)
                 decay_start = cfg.TRAIN.PRETRAINED_EPOCH
                 epoch_start = int(counter / updates_per_epoch)
+                print('beginning of epoch')
+                print('epoch_start(read from filename) - '+str(epoch_start))
+                print('max epoch - '+str(self.max_epoch))
+                epoch_start = 0 #--originally read from filename, now hardocded
                 for epoch in range(epoch_start, self.max_epoch):
                     widgets = ["epoch #%d|" % epoch,
                                Percentage(), Bar(), ETA()]
@@ -628,7 +644,7 @@ class CondGANTrainer(object):
         print('num_examples:', dataset._num_examples)
         while count < dataset._num_examples:
             start = count % dataset._num_examples
-            images, embeddings_batchs, savenames, captions_batchs =\
+            images, embeddings_batchs, styleindices_batchs, savenames, captions_batchs =\
                 dataset.next_batch_test(self.batch_size, start, 1)
 
             print('count = ', count, 'start = ', start)
@@ -642,7 +658,8 @@ class CondGANTrainer(object):
                 for j in range(numSamples):
                     hr_samples, samples =\
                         sess.run([self.hr_fake_images, self.fake_images],
-                                 {self.embeddings: embeddings_batchs[i]})
+                                 {self.embeddings: embeddings_batchs[i]},
+                                 {self.style_indices: styleindices_batchs[i]})
                     samples_batchs.append(samples)
                     hr_samples_batchs.append(hr_samples)
                 self.save_super_images(images, samples_batchs,
